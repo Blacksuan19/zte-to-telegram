@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import click
+import logging
+import sys
+
+from sms.utils import parse_sms
+from zte.zte import ZteConnection, ZteModemException
+
+@click.command()
+@click.option('--host', default='192.168.0.1', help='IP address of ZTE MC888', required=False)
+@click.option('--password', help='Password for ZTE MC888', required=True)
+@click.option('--bot', help='Telegram Bot ID to publish SMS', required=False)
+@click.option('--chat', help='Telegram Chat ID to publish SMS', required=False)
+@click.option('-v', default=False, is_flag=True, help='Verbose logging', required=False)
+def cli(host, password, bot, chat, v):
+    logging.basicConfig(level=logging.DEBUG if v else logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    try:
+        conn = ZteConnection(logger, host, password)
+        conn.login()
+        sms = conn.get_all_sms(True)
+
+        for s in sms:
+            parsed = parse_sms(s)
+            print('Number: {}'.format(parsed.number))
+            print('Date: {}'.format(parsed.date))
+            print('Content: {}'.format(parsed.content))
+    except ZteModemException as e:
+        logger.debug('Failed to process SMS: {}'.format(e))
+        sys.exit(1)
+    except Exception as e:
+        logger.debug('Failed to process SMS: {}'.format(e))
+        sys.exit(2)
+
+# main block
+if __name__ == '__main__':
+    cli()

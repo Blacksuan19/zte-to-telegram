@@ -1,0 +1,5 @@
+click==8.1.7
+requests==2.32.3
+jsonpath-ng==1.7.0
+pygsm7==1.0.4
+python-dateutil==2.9.0.post0
