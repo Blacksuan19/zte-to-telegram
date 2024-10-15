@@ -64,6 +64,8 @@ class ZteConnection:
         r = self.__get_sms_list(0, 500)
         r.raise_for_status()
         matches = [match.value for match in query.find(r.json())]
+        if len(matches) == 0:
+            return matches
 
         ids = []
         for message in matches:
