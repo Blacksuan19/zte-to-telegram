@@ -1,10 +1,11 @@
 import hashlib
-import re
 import requests
 import urllib.parse
 from jsonpath_ng.ext import parse
 
 from logging import Logger
+
+# Documentation: https://wijayamin.github.io/zte-modem-api-docs/
 
 ZTE_API_BASE = '/goform/'
 GET_CMD = 'goform_get_cmd_process'
@@ -181,7 +182,7 @@ class ZteConnection:
 
         return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params_safe, headers=headers, cookies=cookies)
 
-    def __set_sms_read(self, ids: list, ad: str) -> requests.Response|None:
+    def __set_sms_read(self, ids: list, ad: str) -> requests.Response | None:
         """Mark SMS as read."""
 
         if len(ids) == 0:
@@ -198,7 +199,7 @@ class ZteConnection:
 
         return requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies)
 
-    def __delete_sms(self, ids: list, ad: str) -> requests.Response|None:
+    def __delete_sms(self, ids: list, ad: str) -> requests.Response | None:
         """Delete SMSs."""
 
         if len(ids) == 0:
