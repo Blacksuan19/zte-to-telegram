@@ -19,63 +19,30 @@ class ZteConnection:
     """Zte is the class to manage ZTE MC888 device."""
 
     __logger: Logger
-    __host: str
     __url: str
     __password: str
-    __ad: str
+    __cr_version: str
+    __wa_inner_version: str
     __cookie: str
 
     def __init__(self, logger: Logger, host: str, password: str):
         self.__logger = logger
-        self.__host = host
-        self.__password = password
         self.__url = "http://" + host + "/"
+        self.__password = password
+        self.__cr_version = ''
+        self.__wa_inner_version = ''
 
     def login(self) -> None:
         """Login to ZTE MC888 device."""
 
-        # Collect everything we need from device version call.
-        resp = self.__get_device_version()
-        self.__logger.debug('login: getDeviceVersion response: %s', str(resp.content))
-
-        query = parse('$.cr_version')
-        cr_version = query.find(resp.json())[0].value
-        self.__logger.debug('login: crVersion = %s', str(cr_version))
-
-        query = parse('$.wa_inner_version')
-        wa_inner_version = query.find(resp.json())[0].value
-        self.__logger.debug('login: waInnerVersion = %s', str(wa_inner_version))
-
-        # Collect LD and RD values.
-        resp = self.__get_ld()
-        query = parse('$.LD')
-        ld = query.find(resp.json())[0].value
-        self.__logger.debug('login: ld = %s', str(ld))
-
-        resp = self.__get_rd()
-        query = parse('$.RD')
-        rd = query.find(resp.json())[0].value
-        self.__logger.debug('login: rd = %s', str(rd))
-
-        # Calculate password hash (temporary value) and AD (persistent).
-        password_hash = ZteConnection.__calculate_password_hash(self.__password, ld)
-        self.__ad = ZteConnection.__calculate_ad(cr_version, wa_inner_version, rd)
-        self.__logger.debug('login: ad = %s', self.__ad)
-
-        # Send login command.
-        resp = self.__send_login_command(password_hash, self.__ad)
-        if (result := resp.json()['result']) != '0':
-            raise ZteModemException("Non-successful login result: ", result)
-        self.__logger.debug('login: http response: %s, body: %s', str(resp.status_code), str(resp.content))
-
-        # Save login cookie.
-        cookie = resp.headers.get("Set-Cookie")
-        pattern = re.compile('stok=\".*\"')
-        self.__logger.debug('login: cookie header: %s', str(cookie))
-
-        result = pattern.search(cookie)
-        self.__cookie = result.group(0)
+        self.__parse_device_version()
+        self.__cookie = self.__login(self.__calculate_password(self.__get_ld()))
         self.__logger.debug('login: cookie: %s', str(self.__cookie))
+
+    def logout(self) -> None:
+        """Logout from ZTE MC888 device."""
+
+        self.__logout(self.__calculate_ad(self.__get_rd()))
 
     def get_all_sms(self, unread: bool) -> list:
         """Get the list of all SMS."""
@@ -85,96 +52,163 @@ class ZteConnection:
         else:
             query = parse("$.messages[?(@.received_all_concat_sms == '1')]")
 
-        resp = self.__get_sms_list(0, 500)
-        return [match.value for match in query.find(resp.json())]
+        r = self.__get_sms_list(0, 500)
+        r.raise_for_status()
+        return [match.value for match in query.find(r.json())]
 
-    def read_all_sms(self) -> list:
+    def read_all_sms(self, delete: bool) -> list:
         """Read all new SMS."""
 
         query = parse("$.messages[?(@.tag == '1' & @.received_all_concat_sms == '1')]")
 
-        resp = self.__get_sms_list(0, 500)
-        matches = [match.value for match in query.find(resp.json())]
+        r = self.__get_sms_list(0, 500)
+        r.raise_for_status()
+        matches = [match.value for match in query.find(r.json())]
 
         ids = []
         for message in matches:
             ids.append(message['id'])
         self.__logger.debug('read_all_sms: ids: %s', ';'.join(ids))
 
-        # Mark SMS as read.
-        resp = self.__set_sms_read(ids)
-        if resp is not None:
-            if (result := resp.json()['result']) != 'success':
+        # Mark SMS as read or delete them.
+        ad = self.__calculate_ad(self.__get_rd())
+        if delete:
+            r = self.__delete_sms(ids, ad)
+        else:
+            r = self.__set_sms_read(ids, ad)
+        if r is not None:
+            if (result := r.json().get('result', 'None')) != 'success':
                 raise ZteModemException("Non-successful read SMS result: ", result)
 
         return matches
 
-    def __get_device_version(self) -> requests.Response:
-        """Get ZTE device version."""
+    def __parse_device_version(self) -> None:
+        """Parse ZTE device version."""
 
         headers = {"Referer": self.__url}
         params = {"isTest": "false", "cmd": "Language%2Ccr_version%2Cwa_inner_version", "multi_data": "1"}
 
-        return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r.raise_for_status()
+        self.__logger.debug('login: getDeviceVersion response: %s', str(r.content))
 
-    def __get_ld(self) -> requests.Response:
+        j = r.json()
+        if (cr_version := j.get('cr_version', None)) is not None:
+            self.__cr_version = cr_version
+        if (wa_inner_version := j.get('wa_inner_version', None)) is not None:
+            self.__wa_inner_version = wa_inner_version
+
+    def __get_ld(self) -> str:
         """Get ZTE device LD."""
 
         headers = {"Referer": self.__url}
         params = {"isTest": "false", "cmd": "LD"}
 
-        return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r.raise_for_status()
+        ld = r.json().get('LD', None)
+        if ld is None:
+            raise ZteModemException("Unable to get LD: ", str(r.content))
+        self.__logger.debug('LD: %s', ld)
+        return ld
 
-    def __get_rd(self) -> requests.Response:
+    def __get_rd(self) -> str:
         """Get ZTE device RD."""
 
         headers = {"Referer": self.__url}
         params = {"isTest": "false", "cmd": "RD"}
 
-        return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers)
+        r.raise_for_status()
+        rd = r.json().get('RD', None)
+        if rd is None:
+            raise ZteModemException("Unable to get RD: ", str(r.content))
+        self.__logger.debug('RD: %s', rd)
+        return rd
 
-    @staticmethod
-    def __calculate_password_hash(password: str, ld: str) -> str:
+    def __calculate_password(self, ld: str) -> str:
         """Calculate password hash."""
 
-        prefix_hash = hashlib.sha256(password.encode('utf-8')).hexdigest().upper()
+        prefix_hash = hashlib.sha256(self.__password.encode('utf-8')).hexdigest().upper()
         return hashlib.sha256((prefix_hash + ld.upper()).encode('utf-8')).hexdigest().upper()
 
-    @staticmethod
-    def __calculate_ad(cr_version: str, wa_inner_version: str, rd: str) -> str:
+    def __calculate_ad(self, rd: str) -> str:
         """Calculate AD value for login."""
 
-        prefix_hash = hashlib.sha256((wa_inner_version + cr_version).encode('utf-8')).hexdigest().upper()
-        return hashlib.sha256((prefix_hash + rd).encode('utf-8')).hexdigest().upper()
+        prefix_hash = hashlib.sha256((self.__wa_inner_version + self.__cr_version).encode('utf-8')).hexdigest().upper()
+        return hashlib.sha256((prefix_hash + rd.upper()).encode('utf-8')).hexdigest().upper()
 
-    def __send_login_command(self, password_hash: str, ad: str) -> requests.Response:
+    def __login(self, password: str) -> str:
         """Send ZTE device login command."""
 
         headers = {"Origin": self.__url, "Referer": self.__url}
-        params = {"isTest": "false", "goformId": "LOGIN", "password": password_hash, "AD": ad}
+        params = {"isTest": "false", "goformId": "LOGIN", "password": password}
 
-        return requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers)
+        r = requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers)
+        r.raise_for_status()
+        result = r.json().get('result', '-1')
+        if result != '0':
+            raise ZteModemException("Non-successful login result: ", result)
+
+        cookie = r.cookies.get('stok')
+        if cookie is None:
+            raise ZteModemException("Unable to get auth cookie")
+        return cookie
+
+    def __logout(self, ad: str) -> None:
+        """Send ZTE device logout command."""
+
+        headers = {"Origin": self.__url, "Referer": self.__url}
+        cookies = {"stok": self.__cookie}
+        params = {"isTest": "false", "goformId": "LOGOUT", "AD": ad}
+
+        r = requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies)
+        r.raise_for_status()
+        result = r.json().get('result', 'None')
+        if result != 'success':
+            raise ZteModemException("Non-successful login result: ", result)
 
     def __get_sms_list(self, page: int, num_entries: int) -> requests.Response:
         """Send ZTE device get SMS command."""
 
-        headers = {"Referer": self.__url, "Cookie": self.__cookie}
+        headers = {"Referer": self.__url}
+        cookies = {"stok": self.__cookie}
         params = {"isTest": "false", "cmd": "sms_data_total", "page": page, "data_per_page": num_entries,
                   "mem_store": "1", "tags": "10", "order_by": "order+by+id+desc"}
         params_safe = urllib.parse.urlencode(params, safe='+')
 
-        return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params_safe, headers=headers)
+        return requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params_safe, headers=headers, cookies=cookies)
 
-    def __set_sms_read(self, ids: list) -> requests.Response|None:
+    def __set_sms_read(self, ids: list, ad: str) -> requests.Response|None:
+        """Mark SMS as read."""
+
         if len(ids) == 0:
             return None
 
         # Build the full list.
         msg_ids = ''
         for msg_id in ids:
-            msg_ids = msg_ids + msg_id + ";"
+            msg_ids = msg_ids + str(msg_id) + ";"
 
-        headers = {"Origin": self.__url, "Referer": self.__url, "Cookie": self.__cookie}
-        params = {"isTest": "false", "goformId": "SET_MSG_READ", "msg_id": msg_ids, "tag": "0", "AD": self.__ad}
+        headers = {"Origin": self.__url, "Referer": self.__url}
+        cookies = {"stok": self.__cookie}
+        params = {"isTest": "false", "goformId": "SET_MSG_READ", "msg_id": msg_ids, "tag": "0", "AD": ad}
 
-        return requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers)
+        return requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies)
+
+    def __delete_sms(self, ids: list, ad: str) -> requests.Response|None:
+        """Delete SMSs."""
+
+        if len(ids) == 0:
+            return None
+
+        # Build the full list.
+        msg_ids = ''
+        for msg_id in ids:
+            msg_ids = msg_ids + str(msg_id) + ";"
+
+        headers = {"Origin": self.__url, "Referer": self.__url}
+        cookies = {"stok": self.__cookie}
+        params = {"isTest": "false", "goformId": "DELETE_SMS", "msg_id": msg_ids, "AD": ad}
+
+        return requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies)
