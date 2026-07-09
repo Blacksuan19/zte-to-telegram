@@ -1,23 +1,19 @@
+from dataclasses import dataclass
 from datetime import datetime
 
 
+@dataclass
 class Sms:
-    """Definition of SMS message."""
+    """A single SMS message read from the modem."""
 
     sms_id: int
-    """ID of SMS on the device."""
+    """ID of the SMS on the device."""
 
     number: str
-    """Phone number."""
+    """Sender phone number."""
 
     content: str
-    """SMS text."""
+    """Decoded SMS text."""
 
     date: datetime
-    """Date and time when SMS was sent."""
-
-    def __init__(self, sms_id: int, number: str, content: str, date: datetime):
-        self.sms_id = sms_id
-        self.number = number
-        self.content = content
-        self.date = date
+    """Date and time the SMS was sent."""
