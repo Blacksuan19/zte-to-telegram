@@ -5,6 +5,7 @@ import requests
 from sms.sms import Sms
 
 API_BASE = "https://api.telegram.org/bot{}/sendMessage"
+REQUEST_TIMEOUT = 30
 
 
 class TelegramClient:
@@ -29,5 +30,5 @@ class TelegramClient:
 
         url = API_BASE.format(self.__bot_id)
         self.__logger.debug("send_message: forwarding SMS %s from %s", sms.sms_id, sms.number)
-        r = requests.post(url, params={"chat_id": self.__chat_id, "text": text})
+        r = requests.post(url, params={"chat_id": self.__chat_id, "text": text}, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()

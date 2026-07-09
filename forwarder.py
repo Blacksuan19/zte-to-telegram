@@ -24,11 +24,16 @@ class Forwarder:
         finally:
             self.__connection.logout()
 
+        forwarded = 0
         for message in messages:
-            self.__telegram.send_message(parse_sms(message))
+            try:
+                self.__telegram.send_message(parse_sms(message))
+                forwarded += 1
+            except Exception:
+                self.__logger.error("Failed to forward SMS id=%s", message.get("id"), exc_info=True)
 
-        self.__logger.info("Forwarded %d SMS", len(messages))
-        return len(messages)
+        self.__logger.info("Forwarded %d SMS", forwarded)
+        return forwarded
 
     def run_loop(self, interval: int) -> None:
         """Run ``run_once`` forever, sleeping ``interval`` seconds between cycles."""

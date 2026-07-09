@@ -32,6 +32,20 @@ class FakeTelegram:
         self.sent.append(sms)
 
 
+class FailingMiddleTelegram:
+    """Raises when forwarding the second SMS it sees; otherwise records it."""
+
+    def __init__(self):
+        self.sent = []
+        self._calls = 0
+
+    def send_message(self, sms):
+        self._calls += 1
+        if self._calls == 2:
+            raise RuntimeError("boom")
+        self.sent.append(sms)
+
+
 def _raw(i):
     return {"id": str(i), "number": "+1555000000" + str(i), "content": "D4F29C0E", "date": "24,03,07,14,30,05,8"}
 
@@ -65,3 +79,14 @@ def test_run_once_logs_out_even_on_error():
         pass
     # login failed before a session existed; logout must not be attempted.
     assert conn.logged_out is False
+
+
+def test_run_once_isolates_single_message_forward_failure():
+    conn = FakeConnection([_raw(1), _raw(2), _raw(3)])
+    tg = FailingMiddleTelegram()
+    fwd = Forwarder(logging.getLogger("test"), conn, tg, delete=True)
+
+    count = fwd.run_once()
+
+    assert count == 2
+    assert len(tg.sent) == 2

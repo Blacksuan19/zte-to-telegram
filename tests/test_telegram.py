@@ -20,3 +20,4 @@ def test_send_message_posts_formatted_text():
     text = kwargs["params"]["text"]
     assert "+15551234567" in text
     assert "Hello world" in text
+    assert kwargs["timeout"] == 30
