@@ -288,3 +288,13 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,intellij
 
+# Environments
+.env
+.venv/
+
+# Local design/planning docs (not committed)
+docs/superpowers/
+
+# uv
+# (uv.lock IS committed)
+
