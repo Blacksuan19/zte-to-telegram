@@ -1,4 +1,5 @@
 import logging
+from unittest.mock import patch
 
 from forwarder import Forwarder
 
@@ -90,3 +91,28 @@ def test_run_once_isolates_single_message_forward_failure():
 
     assert count == 2
     assert len(tg.sent) == 2
+
+
+class _StopLoop(Exception):
+    pass
+
+
+def test_run_loop_swallows_cycle_errors_and_sleeps():
+    conn = FakeConnection([], raise_on_login=True)  # each run_once raises
+    fwd = Forwarder(logging.getLogger("test"), conn, FakeTelegram(), delete=True)
+
+    calls = []
+
+    def fake_sleep(interval):
+        calls.append(interval)
+        # Break out after the loop has run one full cycle.
+        raise _StopLoop
+
+    with patch("forwarder.time.sleep", side_effect=fake_sleep):
+        try:
+            fwd.run_loop(5)
+        except _StopLoop:
+            pass
+
+    # The failing cycle was swallowed and the loop still reached the sleep call.
+    assert calls == [5]
