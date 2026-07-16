@@ -5,14 +5,13 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     commit-message:
       prefix: build
       include: scope
     # Group all non-major updates into a single PR; majors get their own PRs.
     groups:
-      python-dependencies:
-        applies-to: version-updates
+      uv:
         patterns:
           - "*"
         update-types:
@@ -24,16 +23,16 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     commit-message:
       prefix: ci
       include: scope
-    # Group all non-major updates into a single PR; majors get their own PRs.
+    # Group every update, including majors, into a single PR.
     groups:
       github-actions:
-        applies-to: version-updates
         patterns:
           - "*"
         update-types:
+          - major
           - minor
           - patch
