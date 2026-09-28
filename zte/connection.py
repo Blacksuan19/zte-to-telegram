@@ -71,7 +71,16 @@ class ZteConnection:
         self.__parse_device_version()
         self.__cookie = self.__login(self._calculate_password(self.__get_ld()))
         self.__logger.debug("login: cookie: %s", str(self.__cookie))
-        self.__session_key = self.__establish_encryption_session()
+
+        try:
+            self.__session_key = self.__establish_encryption_session()
+        except Exception:
+            # Older firmware doesn't support this handshake and sends SMS fields as
+            # plain hex; keep __session_key unset so _decrypt_zte_field leaves them as-is.
+            self.__logger.warning(
+                "Unable to establish an SMS encryption session; assuming firmware that sends unencrypted SMS fields",
+                exc_info=True,
+            )
 
     def logout(self) -> None:
         """Logout from the ZTE MC888 device."""
@@ -82,9 +91,7 @@ class ZteConnection:
         """Get the list of all SMS."""
 
         if unread:
-            query = parse(
-                "$.messages[?(@.tag == '1' & @.received_all_concat_sms == '1')]"
-            )
+            query = parse("$.messages[?(@.tag == '1' & @.received_all_concat_sms == '1')]")
         else:
             query = parse("$.messages[?(@.received_all_concat_sms == '1')]")
 
@@ -128,18 +135,9 @@ class ZteConnection:
 
     def __parse_device_version(self) -> None:
         headers = {"Referer": self.__url}
-        params = {
-            "isTest": "false",
-            "cmd": "Language%2Ccr_version%2Cwa_inner_version",
-            "multi_data": "1",
-        }
+        params = {"isTest": "false", "cmd": "Language%2Ccr_version%2Cwa_inner_version", "multi_data": "1"}
 
-        r = requests.get(
-            self.__url + ZTE_API_BASE + GET_CMD,
-            params=params,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         self.__logger.debug("login: getDeviceVersion response: %s", str(r.content))
 
@@ -155,9 +153,7 @@ class ZteConnection:
                 if field not in message:
                     continue
                 try:
-                    message[field] = _decrypt_zte_field(
-                        message[field], self.__session_key
-                    )
+                    message[field] = _decrypt_zte_field(message[field], self.__session_key)
                 except Exception:
                     self.__logger.warning(
                         "Unable to decrypt SMS id=%s field=%s",
@@ -192,9 +188,7 @@ class ZteConnection:
 
         public_key = RSA.import_key(_normalize_pem(pem))
         session_key = secrets.token_bytes(32)
-        encrypted_key = PKCS1_v1_5.new(public_key).encrypt(
-            session_key.hex().encode("utf-8")
-        )
+        encrypted_key = PKCS1_v1_5.new(public_key).encrypt(session_key.hex().encode("utf-8"))
         web_enstr = base64.b64encode(encrypted_key).decode("ascii")
 
         headers = {"Origin": self.__url, "Referer": self.__url}
@@ -214,9 +208,7 @@ class ZteConnection:
         )
         r.raise_for_status()
         if r.json().get("result") != "success":
-            raise ZteModemException(
-                "Unable to establish encryption session: ", str(r.content)
-            )
+            raise ZteModemException("Unable to establish encryption session: ", str(r.content))
 
         return session_key
 
@@ -224,12 +216,7 @@ class ZteConnection:
         headers = {"Referer": self.__url}
         params = {"isTest": "false", "cmd": "LD"}
 
-        r = requests.get(
-            self.__url + ZTE_API_BASE + GET_CMD,
-            params=params,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         ld = r.json().get("LD", None)
         if ld is None:
@@ -241,12 +228,7 @@ class ZteConnection:
         headers = {"Referer": self.__url}
         params = {"isTest": "false", "cmd": "RD"}
 
-        r = requests.get(
-            self.__url + ZTE_API_BASE + GET_CMD,
-            params=params,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        r = requests.get(self.__url + ZTE_API_BASE + GET_CMD, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         rd = r.json().get("RD", None)
         if rd is None:
@@ -257,39 +239,18 @@ class ZteConnection:
     def _calculate_password(self, ld: str) -> str:
         """Calculate the login password hash."""
 
-        prefix_hash = (
-            hashlib.sha256(self.__password.encode("utf-8")).hexdigest().upper()
-        )
-        return (
-            hashlib.sha256((prefix_hash + ld.upper()).encode("utf-8"))
-            .hexdigest()
-            .upper()
-        )
+        prefix_hash = hashlib.sha256(self.__password.encode("utf-8")).hexdigest().upper()
+        return hashlib.sha256((prefix_hash + ld.upper()).encode("utf-8")).hexdigest().upper()
 
     def __calculate_ad(self, rd: str) -> str:
-        prefix_hash = (
-            hashlib.sha256(
-                (self.__wa_inner_version + self.__cr_version).encode("utf-8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        return (
-            hashlib.sha256((prefix_hash + rd.upper()).encode("utf-8"))
-            .hexdigest()
-            .upper()
-        )
+        prefix_hash = hashlib.sha256((self.__wa_inner_version + self.__cr_version).encode("utf-8")).hexdigest().upper()
+        return hashlib.sha256((prefix_hash + rd.upper()).encode("utf-8")).hexdigest().upper()
 
     def __login(self, password: str) -> str:
         headers = {"Origin": self.__url, "Referer": self.__url}
         params = {"isTest": "false", "goformId": "LOGIN", "password": password}
 
-        r = requests.post(
-            self.__url + ZTE_API_BASE + SET_CMD,
-            data=params,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        r = requests.post(self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         result = r.json().get("result", "-1")
         if result != "0":
@@ -306,11 +267,7 @@ class ZteConnection:
         params = {"isTest": "false", "goformId": "LOGOUT", "AD": ad}
 
         r = requests.post(
-            self.__url + ZTE_API_BASE + SET_CMD,
-            data=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=REQUEST_TIMEOUT,
+            self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT
         )
         r.raise_for_status()
         result = r.json().get("result", "None")
@@ -347,20 +304,10 @@ class ZteConnection:
 
         headers = {"Origin": self.__url, "Referer": self.__url}
         cookies = {"stok": self.__cookie}
-        params = {
-            "isTest": "false",
-            "goformId": "SET_MSG_READ",
-            "msg_id": msg_ids,
-            "tag": "0",
-            "AD": ad,
-        }
+        params = {"isTest": "false", "goformId": "SET_MSG_READ", "msg_id": msg_ids, "tag": "0", "AD": ad}
 
         return requests.post(
-            self.__url + ZTE_API_BASE + SET_CMD,
-            data=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=REQUEST_TIMEOUT,
+            self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT
         )
 
     def __delete_sms(self, ids: list, ad: str) -> requests.Response | None:
@@ -371,17 +318,8 @@ class ZteConnection:
 
         headers = {"Origin": self.__url, "Referer": self.__url}
         cookies = {"stok": self.__cookie}
-        params = {
-            "isTest": "false",
-            "goformId": "DELETE_SMS",
-            "msg_id": msg_ids,
-            "AD": ad,
-        }
+        params = {"isTest": "false", "goformId": "DELETE_SMS", "msg_id": msg_ids, "AD": ad}
 
         return requests.post(
-            self.__url + ZTE_API_BASE + SET_CMD,
-            data=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=REQUEST_TIMEOUT,
+            self.__url + ZTE_API_BASE + SET_CMD, data=params, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT
         )
