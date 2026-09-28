@@ -41,6 +41,8 @@ def _decrypt_zte_field(encrypted_text: str, session_key: bytes | None) -> str:
         return encrypted_text
 
     raw = base64.b64decode(encrypted_text)
+    if len(raw) < 28:
+        return encrypted_text
     iv, tag, ciphertext = raw[:12], raw[12:28], raw[28:]
     cipher = AES.new(session_key, AES.MODE_GCM, nonce=iv)
     return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
@@ -77,7 +79,7 @@ class ZteConnection:
         except Exception:
             # Older firmware doesn't support this handshake and sends SMS fields as
             # plain hex; keep __session_key unset so _decrypt_zte_field leaves them as-is.
-            self.__logger.warning(
+            self.__logger.debug(
                 "Unable to establish an SMS encryption session; assuming firmware that sends unencrypted SMS fields",
                 exc_info=True,
             )
@@ -155,12 +157,7 @@ class ZteConnection:
                 try:
                     message[field] = _decrypt_zte_field(message[field], self.__session_key)
                 except Exception:
-                    self.__logger.warning(
-                        "Unable to decrypt SMS id=%s field=%s",
-                        message.get("id"),
-                        field,
-                        exc_info=True,
-                    )
+                    self.__logger.warning("Unable to decrypt SMS id=%s field=%s", message.get("id"), field)
 
     def __establish_encryption_session(self) -> bytes:
         """Negotiate the AES-256-GCM session key the device uses to encrypt SMS fields.

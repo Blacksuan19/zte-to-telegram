@@ -319,7 +319,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = "==8.5.0" },
     { name = "jsonpath-ng", specifier = "==1.8.0" },
-    { name = "pycryptodome", specifier = ">=3.23.0" },
+    { name = "pycryptodome", specifier = "==3.23.0" },
     { name = "pygsm7", specifier = "==1.0.6" },
     { name = "python-dateutil", specifier = "==2.9.0.post0" },
     { name = "python-dotenv", specifier = "==1.2.3" },
