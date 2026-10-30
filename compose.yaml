@@ -1,0 +1,14 @@
+name: zte-to-telegram
+
+services:
+  zte-to-telegram:
+    image: ghcr.io/blacksuan19/zte-to-telegram:latest
+    init: true
+    restart: unless-stopped
+    environment:
+      ZTE_HOST: "192.168.0.1"
+      ZTE_PASSWORD: ""
+      ZTE_BOT: ""
+      ZTE_CHAT: ""
+      ZTE_INTERVAL: "60"
+      ZTE_DELETE: "false"

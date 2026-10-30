@@ -22,10 +22,11 @@ Run once, passing everything on the command line:
 uv run zte-to-telegram --password <modem-password> --bot <telegram-bot-token> --chat <telegram-chat-id>
 ```
 
-### Environment variables / `.env` file
+### CLI environment variables / `.env` file
 
 Every option can be supplied as an environment variable instead, using the `ZTE_` prefix
-(e.g. `--password` becomes `ZTE_PASSWORD`). Copy `.env.dist` to `.env` and fill it in:
+(e.g. `--password` becomes `ZTE_PASSWORD`). For local CLI usage, you can optionally copy
+`.env.dist` to `.env` and fill it in:
 
 ```bash
 cp .env.dist .env
@@ -74,20 +75,70 @@ If you'd rather not run a daemon, schedule the one-shot command instead, e.g. ev
 
 ## Docker
 
-Build the image:
+### Deploy with Compose
+
+Only `compose.yaml` is needed on the server. It pulls the published image and supplies
+configuration through the service's `environment:` block—no `.env` file, source checkout,
+volumes, or port mappings are required.
+
+In your private deployment copy, set `ZTE_HOST` to the modem's IP address and fill in
+`ZTE_PASSWORD`, `ZTE_BOT`, and `ZTE_CHAT`. The checked-in credentials are deliberately blank.
+Adjust `ZTE_INTERVAL` and `ZTE_DELETE` there as needed; keep all values quoted as strings.
+When editing credentials directly in Compose YAML, escape literal `$` characters as `$$`.
+Keep the configured copy private: credentials are stored in the deployment configuration
+and are visible to Docker administrators, not baked into the image.
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs -f
+```
+
+The image supports Linux AMD64 and ARM64, runs as UID/GID `10001:10001`, and starts in loop
+mode by default. Compose enables an init process and restarts the service unless stopped.
+The container must be able to reach the modem's IP address and `api.telegram.org`.
+
+For updates, repeat the `pull` and `up -d` commands above. Restart policies do not pull updates.
+
+### Import into ZimaOS
+
+Use [ZimaOS's custom-app Compose import](https://www.zimaspace.com/docs/zimaos/app-store/paperless-ai-install):
+
+1. On the dashboard, choose **+ → Install a customized app → Import → Docker Compose**.
+2. Paste `compose.yaml` and select **Submit**.
+3. Set the modem address and credentials under **Environment Variables** before installing.
+
+There is no web UI to expose and no folder to mount. Credentials are normal container
+environment variables managed in ZimaOS; you do not need to upload a `.env` file.
+
+### Build locally
 
 ```bash
 docker build -t zte-to-telegram .
+docker run --rm --network none --read-only zte-to-telegram --help
 ```
 
-Run it, supplying configuration via an env file (never bake secrets into the image):
+To deploy a local build, change the service's `image` in your private `compose.yaml` copy to
+`zte-to-telegram`, then run `docker compose up -d` without pulling from GHCR.
 
-```bash
-docker run --env-file .env zte-to-telegram
-```
+### GitHub Actions publishing
 
-The container's default command runs in loop mode (`zte-to-telegram --loop`), so it keeps
-polling and forwarding SMS for as long as it runs.
+`.github/workflows/docker-publish.yml` follows the native AMD64/ARM64 build and manifest-merge
+pattern from the sibling big-AGI project. Each architecture's installed CLI is smoke-checked
+before publication. Pull requests build and check both architectures without publishing.
+Images are pushed to `ghcr.io/<owner>/<repository>` (lowercase) using `GITHUB_TOKEN`:
+
+- Pushes to `main` publish `latest`, `main`, and `sha-<short-commit>` tags.
+- Git tags publish the tag name and `sha-<short-commit>`; they do not move `latest`.
+- **Actions → Build and publish Docker image → Run workflow** publishes the selected ref.
+
+The workflow retains build caches per architecture and attests the combined image digest.
+No registry password secret is needed. Repository or organization policy must allow the
+workflow's package-write and attestation permissions. After the first publish, set the GHCR
+package visibility to **Public** for unauthenticated pulls. For a private package, run
+`docker login ghcr.io` with a token that has `read:packages` access before pulling.
+
+Publishing does not restart containers on a deployment host; use the update procedure above.
 
 ## Configuration
 
